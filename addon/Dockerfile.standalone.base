@@ -1,9 +1,40 @@
-FROM thespaghettidetective/ml_api_base:1.3
+FROM ubuntu:22.04 as obico_opencl_builder
+
+# Set environment to non-interactive (this prevents some prompts)
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Custom OpenCL installation
+RUN apt update && apt upgrade -y
+
+# Install base dependencies and Clang
+RUN apt-get update && \
+    apt-get install -y build-essential cmake git clang clang-format clang-tidy \
+    ocl-icd-opencl-dev ocl-icd-dev opencl-headers clinfo ca-certificates libopencv-dev \
+    libomp-dev libclblas-dev libclfft-dev 
+
+# Clone Darknet repo and set up for OpenCL
+WORKDIR /
+RUN git clone https://github.com/sowson/darknet  && cd darknet &&  git checkout aa44a7c1ffde24d2d54e894a3af3f47074b76130
+RUN cd darknet \
+  && sed -i 's/NVIDIA=1/NVIDIA=0/' Makefile \
+  && sed -i 's/AMD=0/AMD=1/' Makefile \
+  && make -j 4
+
+# Create final image
+FROM  ubuntu:22.04 as ml_api_base
+
+# Copy darknet compiled in the first stage
+COPY --from=obico_opencl_builder /darknet /darknet
 WORKDIR /app
+RUN apt update && apt install -y ca-certificates pip wget
+RUN pip install --upgrade pip
+RUN pip install  opencv_python_headless 
+# # Install ONNX and ONNX Runtime with OpenCL support
+RUN pip install onnx onnxruntime 
+
 EXPOSE 3333
 
 ADD rootfs/app /app
-RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
 RUN echo 'Downloading the latest failure detection AI model in Darknet format...'
