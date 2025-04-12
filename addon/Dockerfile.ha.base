@@ -1,16 +1,17 @@
-FROM ghcr.io/home-assistant/amd64-base-debian:bookworm as darknet_builder
+FROM ghcr.io/home-assistant/amd64-base-debian:bookworm as obico_opencl_builder
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt update && apt install -y ca-certificates build-essential gcc g++ cmake git
-WORKDIR /
+RUN apt-get update && \
+    apt-get install -y build-essential cmake git clang clang-format clang-tidy \
+    ocl-icd-opencl-dev ocl-icd-dev opencl-headers clinfo ca-certificates libopencv-dev \
+    libomp-dev libclblas-dev libclfft-dev 
 # Lock darknet version for reproducibility
-RUN git clone https://github.com/AlexeyAB/darknet && cd darknet && git checkout 59c86222c5387bffd9108a21885f80e980ece234
 # compile CPU version
+WORKDIR /
+RUN git clone https://github.com/sowson/darknet  && cd darknet &&  git checkout aa44a7c1ffde24d2d54e894a3af3f47074b76130
 RUN cd darknet \
-  && sed -i 's/GPU=1/GPU=0/' Makefile \
-  && sed -i 's/CUDNN=1/CUDNN=0/' Makefile \
-  && sed -i 's/CUDNN_HALF=1/CUDNN_HALF=0/' Makefile \
-  && sed -i 's/LIBSO=0/LIBSO=1/' Makefile \
-  && make -j 4 && mv libdarknet.so libdarknet_cpu.so
+  && sed -i 's/NVIDIA=1/NVIDIA=0/' Makefile \
+  && sed -i 's/AMD=0/AMD=1/' Makefile \
+  && make -j 4
 
 # -----------------------------------------------------------------------------
 
@@ -18,23 +19,25 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm as ml_api_base_amd64
 
 RUN apt update && apt install --no-install-recommends -y ca-certificates python3-pip wget python3 python3-venv
 
-COPY rootfs /
-COPY --from=darknet_builder /darknet /darknet
 
+COPY --from=obico_opencl_builder /darknet /darknet
 WORKDIR /app
+COPY addon/rootfs /
+RUN apt update && apt install -y ca-certificates pip wget
+RUN pip install --upgrade pip
+RUN pip install  opencv_python_headless 
+# # Install ONNX and ONNX Runtime with OpenCL support
+RUN pip install onnx onnxruntime 
 
-RUN python3 -m venv venv
-ENV VIRTUAL_ENV /app/venv
-ENV PATH /app/venv/bin:$PATH
+EXPOSE 3333
 
-RUN pip3 install --upgrade pip && \
-    pip3 install opencv_python_headless && \
-    pip3 install -r requirements.txt
+ADD addon/rootfs/app /app
+RUN pip install -r requirements.txt
 
-RUN echo 'Downloading the latest failure detection AI model in Darknet format...' && \
-    wget -O model/model-weights.darknet $(cat model/model-weights.darknet.url | tr -d '\r') && \
-    echo 'Downloading the latest failure detection AI model in ONNX format...' && \
-    wget -O model/model-weights.onnx $(cat model/model-weights.onnx.url | tr -d '\r')
+RUN echo 'Downloading the latest failure detection AI model in Darknet format...'
+RUN wget -O model/model-weights.darknet $(cat model/model-weights.darknet.url | tr -d '\r')
+RUN echo 'Downloading the latest failure detection AI model in ONNX format...'
+RUN wget -O model/model-weights.onnx $(cat model/model-weights.onnx.url | tr -d '\r')
 
 RUN chmod +x /etc/services.d/ha-bambulab-spaghetti-detection/run
 

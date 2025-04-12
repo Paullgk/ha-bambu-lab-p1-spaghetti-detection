@@ -34,7 +34,7 @@ RUN pip install onnx onnxruntime
 
 EXPOSE 3333
 
-ADD rootfs/app /app
+ADD addon/rootfs/app /app
 RUN pip install -r requirements.txt
 
 RUN echo 'Downloading the latest failure detection AI model in Darknet format...'
